@@ -31,15 +31,40 @@ jobs:
             fi
           fi
 
-      - name: Compile ELF and prepare pkg_stage
+      - name: Extract ZIP and compile ELF + pkg_stage
         run: |
           export OO_PS4_TOOLCHAIN=/opt/OpenOrbis/PS4Toolchain
+
+          ZIP_FILE=$(find . -maxdepth 2 -name "*.zip" | head -n 1)
+          PROJECT_DIR=""
+
+          if [ -n "$ZIP_FILE" ]; then
+            echo "Found zip archive: $ZIP_FILE — extracting..."
+            unzip -o "$ZIP_FILE" -d ./extracted_proj
+            PROJECT_DIR=$(find ./extracted_proj -name "build.sh" -exec dirname {} \; | head -n 1)
+          fi
+
+          if [ -z "$PROJECT_DIR" ]; then
+            PROJECT_DIR=$(find . -maxdepth 3 -name "build.sh" -exec dirname {} \; | head -n 1)
+          fi
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "Error: build.sh not found."
+            ls -la
+            exit 1
+          fi
+
+          echo "Building inside: $PROJECT_DIR"
+          cd "$PROJECT_DIR"
           chmod +x build.sh
-          ./build.sh || true
+          ./build.sh
+
+          mkdir -p "$GITHUB_WORKSPACE/build_artifacts"
+          cp -r build/* "$GITHUB_WORKSPACE/build_artifacts/" 2>/dev/null || true
 
       - name: Attempt PKG packaging if tool is available
         run: |
-          mkdir -p build/output
+          mkdir -p "$GITHUB_WORKSPACE/build_artifacts/output"
           PKG_BUILDER=""
           if command -v orbis-pub-cmd >/dev/null 2>&1; then
             PKG_BUILDER="orbis-pub-cmd"
@@ -51,14 +76,12 @@ jobs:
             echo "Found PKG builder: $PKG_BUILDER"
             "$PKG_BUILDER" --help || true
           else
-            echo "No PKG builder binary found in runner or ./tools/. Staging directory is ready in build/pkg_stage."
+            echo "No PKG builder binary found in runner or ./tools/. Staging directory is ready in build_artifacts/pkg_stage."
           fi
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: GameHub-PS4-Build
-          path: |
-            build/
-            !build/pkg_stage/
+          path: build_artifacts/
           if-no-files-found: warn
