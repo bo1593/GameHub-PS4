@@ -1,0 +1,64 @@
+name: Build PS4 PKG from Mobile
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Install basic dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git curl unzip p7zip-full
+
+      - name: Setup OpenOrbis PS4 Toolchain
+        run: |
+          export OO_PS4_TOOLCHAIN=/opt/OpenOrbis/PS4Toolchain
+          sudo mkdir -p /opt/OpenOrbis
+          if [ ! -d "$OO_PS4_TOOLCHAIN" ]; then
+            git clone --depth=1 https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain.git /tmp/oo_repo || true
+            if [ -d "/tmp/oo_repo/PS4Toolchain" ]; then
+              sudo mv /tmp/oo_repo/PS4Toolchain "$OO_PS4_TOOLCHAIN"
+            elif [ -d "/tmp/oo_repo" ]; then
+              sudo mv /tmp/oo_repo "$OO_PS4_TOOLCHAIN"
+            fi
+          fi
+
+      - name: Compile ELF and prepare pkg_stage
+        run: |
+          export OO_PS4_TOOLCHAIN=/opt/OpenOrbis/PS4Toolchain
+          chmod +x build.sh
+          ./build.sh || true
+
+      - name: Attempt PKG packaging if tool is available
+        run: |
+          mkdir -p build/output
+          PKG_BUILDER=""
+          if command -v orbis-pub-cmd >/dev/null 2>&1; then
+            PKG_BUILDER="orbis-pub-cmd"
+          elif [ -x "./tools/orbis-pub-cmd" ]; then
+            PKG_BUILDER="./tools/orbis-pub-cmd"
+          fi
+
+          if [ -n "$PKG_BUILDER" ]; then
+            echo "Found PKG builder: $PKG_BUILDER"
+            "$PKG_BUILDER" --help || true
+          else
+            echo "No PKG builder binary found in runner or ./tools/. Staging directory is ready in build/pkg_stage."
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameHub-PS4-Build
+          path: |
+            build/
+            !build/pkg_stage/
+          if-no-files-found: warn
